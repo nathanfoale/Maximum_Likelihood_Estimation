@@ -1,0 +1,123 @@
+library(ggplot2)
+library(MASS)
+library(shiny)
+
+ui <- navbarPage("Weibull Distribution Analysis",
+                 tabPanel("Simulation",
+                          sidebarLayout(
+                            sidebarPanel(
+                              selectInput(inputId = "n_val", label="Sample size", choices=list(10,20,100,500), selected=10, multiple=FALSE),
+                              selectInput(inputId = "M_val", label="Replications", choices=list(10,20,500,5000), selected=10, multiple=FALSE),
+                              numericInput(inputId = "shape_val", label = "Weibull Shape Parameter", value = 3, min = 1, max = 10)
+                            ),
+                            mainPanel(
+                              plotOutput("plot"),
+                              plotOutput("plot1")
+                            )
+                          )
+                 ),
+                 tabPanel("Summary Statistics",
+                          mainPanel(
+                            verbatimTextOutput("summary")
+                          )
+                 )
+)
+
+server <- function(input, output, session) {
+  
+  M_seq=c(10,20,500,5000)
+  n_seq=c(10,20,100,500)
+  
+  gamma_true = 3
+  theta_true = 4
+  
+  logl = function(theta, gamma_0, y){
+    ll = -length(y) * gamma_0 * log(theta) - (1/theta^gamma_0) * sum(y^gamma_0)
+    return(-ll)
+  }
+  
+  observe({
+    gamma_true <- input$shape_val  
+  })
+  
+  calculate_mle <- reactive({
+    mle_df = NULL
+    for(j in 1:length(n_seq)){
+      
+      n = n_seq[j]
+      for(k in 1:length(M_seq)){
+        
+        M = M_seq[k]
+        
+        #first parameter of interest: theta^gamma
+        mle_1 = numeric(M)
+        
+        #second parameter of interest: theta(log(2))^(1/gamma)
+        mle_2 = numeric(M)
+        
+        for(i in 1:M){
+          y_draws = rweibull(n, shape = gamma_true, scale = theta_true)
+          theta_mle = optimize(logl, interval = c(0, 50), gamma_0 = gamma_true, y = y_draws)$minimum
+          mle_1[i] = theta_mle^gamma_true
+          mle_2[i] = theta_mle * (log(2))^(1/gamma_true)
+        }
+        
+        std_mle_1 = (mle_1 - mean(mle_1)) / sqrt(var(mle_1))
+        std_mle_2 = (mle_2 - mean(mle_2)) / sqrt(var(mle_2))
+        
+        mle = data.frame(mle_1, mle_2, std_mle_1, std_mle_2, n = rep(n, M), M = rep(M, M))
+        
+        if(is.null(mle_df)){
+          mle_df = mle
+        } else {
+          mle_df = rbind(mle_df, mle)
+        }
+      }
+    }
+    
+    colnames(mle_df) = c("mle_1", "mle_2", "std_mle_1", "std_mle_2", "n", "M")
+    return(mle_df)
+  })
+  
+  output$plot <- renderPlot({
+    mle_df = calculate_mle()
+    filtered_data = mle_df[(mle_df$n == input$n_val) & (mle_df$M == input$M_val), ]
+    
+    p <- ggplot(filtered_data, aes(x = mle_1)) +
+      ggtitle("Distribution of MLE") +
+      xlab("MLE") +
+      ylab("Density") +
+      theme(
+        plot.title = element_text(size = 14, face = "bold.italic"),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold")
+      ) +
+      stat_density(aes(x = mle_1), position = "identity", geom = "line")
+    print(p)
+  })
+  
+  output$plot1 <- renderPlot({
+    mle_df = calculate_mle()
+    filtered_data = mle_df[(mle_df$n == input$n_val) & (mle_df$M == input$M_val), ]
+    
+    m <- ggplot(filtered_data, aes(x = std_mle_1, y = std_mle_2)) +
+      ggtitle("Contour plot of MLE 1 and MLE 2") +
+      xlab("Standardized MLE 1") +
+      ylab("Standardized MLE 2") +
+      theme(
+        plot.title = element_text(size = 14, face = "bold.italic"),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold")
+      ) +
+      geom_density_2d()
+    print(m)
+  })
+  
+  output$summary <- renderPrint({
+    mle_df = calculate_mle()
+    summary(mle_df)
+  })
+  
+}
+
+shinyApp(ui = ui, server = server)

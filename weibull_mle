@@ -119,5 +119,5 @@ server <- function(input, output, session) {
   })
   
 }
-
+#run this on your own machine to see application
 shinyApp(ui = ui, server = server)
